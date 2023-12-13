@@ -47,6 +47,7 @@ link_directories(
 )
 
 find_package(OpenCV)
+find_package(yaml-cpp REQUIRED)
 
 # add_executable(main sampleYOLOV7LocalVideoDet.cpp)
 # add_executable(main sampleYOLOV7LocalVideoShow.cpp)
@@ -56,7 +57,7 @@ add_executable(main sampleYOLOV7EthVideoDet.cpp)
 if(target STREQUAL "Simulator_Function")
     target_link_libraries(main funcsim)
 else()
-    target_link_libraries(main ascendcl acl_dvpp stdc++ acllite ${OpenCV_LIBS} opencv_core opencv_imgproc opencv_imgcodecs opencv_videoio dl rt)
+    target_link_libraries(main ascendcl acl_dvpp stdc++ acllite ${OpenCV_LIBS} opencv_core opencv_imgproc opencv_imgcodecs opencv_videoio dl rt yaml-cpp)
 endif()
 
 # install(TARGETS main DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})

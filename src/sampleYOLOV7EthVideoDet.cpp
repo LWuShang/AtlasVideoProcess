@@ -16,6 +16,7 @@
 #include <string.h>
 #include <opencv2/opencv.hpp>
 #include <chrono>
+#include <yaml-cpp/yaml.h>
 
 using namespace std;
 using namespace cv;
@@ -142,9 +143,12 @@ int sockfdUDPSend;
 struct sockaddr_in serverAddrUdpSend;
 void InitUDPSendInfo()
 {
+    YAML::Node config = YAML::LoadFile("config.yaml");
+    const std::string serverIp = config["serverIp"].as<std::string>();
+    
     // 定义服务器地址和端口
-    //const char* serverIP = "127.0.0.1";
-    int serverPort = 8888;
+    uint16_t serverPort = config["serverPort"].as<uint16_t>();
+    printf("serverIp:%s serverPort:%d\n", serverIp.c_str(), serverPort);
 
     // 创建UDP套接字
     sockfdUDPSend = socket(AF_INET, SOCK_DGRAM, 0);
@@ -156,7 +160,7 @@ void InitUDPSendInfo()
     // 设置服务器地址
     serverAddrUdpSend.sin_family = AF_INET;
     serverAddrUdpSend.sin_port = htons(serverPort);
-    serverAddrUdpSend.sin_addr.s_addr = inet_addr("192.168.137.100");
+    serverAddrUdpSend.sin_addr.s_addr = inet_addr(serverIp.c_str());
     bind(sockfdUDPSend, (sockaddr*)&serverAddrUdpSend, sizeof(serverAddrUdpSend));//绑定端口号
     ACLLITE_LOG_INFO("InitUDPSendInfo success");
 }
