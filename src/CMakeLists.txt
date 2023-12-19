@@ -51,8 +51,9 @@ find_package(yaml-cpp REQUIRED)
 
 # add_executable(main sampleYOLOV7LocalVideoDet.cpp)
 # add_executable(main sampleYOLOV7LocalVideoShow.cpp)
-add_executable(main sampleYOLOV7EthVideoDet.cpp)
+# add_executable(main sampleYOLOV7EthVideoDet.cpp)
 # add_executable(main sampleYOLOV7EthVideoShow.cpp)
+add_executable(main sampleYOLOV7.cpp serial.cpp)
 
 if(target STREQUAL "Simulator_Function")
     target_link_libraries(main funcsim)

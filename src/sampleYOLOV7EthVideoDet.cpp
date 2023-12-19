@@ -25,7 +25,7 @@ typedef enum Result {
     FAILED = 1
 } Result;
 
-cv::Mat img; 
+cv::Mat img;
 cv::Mat srcImage;
 
 typedef struct BoundBox {
@@ -145,7 +145,7 @@ void InitUDPSendInfo()
 {
     YAML::Node config = YAML::LoadFile("config.yaml");
     const std::string serverIp = config["serverIp"].as<std::string>();
-    
+
     // 定义服务器地址和端口
     uint16_t serverPort = config["serverPort"].as<uint16_t>();
     printf("serverIp:%s serverPort:%d\n", serverIp.c_str(), serverPort);
@@ -354,8 +354,8 @@ Result SampleYOLOV7::GetResult(std::vector<InferenceOutput>& inferOutputs,
     // string savePath = "out_" + to_string(imageIndex) + ".jpg";
     // cv::imwrite(savePath, srcImage);
     UdpSendVideo(srcImage);
-    // cv::imshow("1", srcImage);
-    // cv::waitKey(1);
+    //cv::imshow("1", srcImage);
+    //cv::waitKey(1);
     if (release){
         free(classBuff);
         classBuff = nullptr;
@@ -413,7 +413,7 @@ int main(int argc, char *argv[])
     // 设置服务器地址信息
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(10001); // 指定UDP端口
-    serverAddr.sin_addr.s_addr = INADDR_ANY; 
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
 
     // 将套接字绑定到服务器地址
     if (bind(sockfd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
@@ -432,7 +432,7 @@ int main(int argc, char *argv[])
     int ii = 0;
     bool started = false;
 
-    int nRecvBuf = 5 * 1024 * 1024;       
+    int nRecvBuf = 5 * 1024 * 1024;
     setsockopt(sockfd,SOL_SOCKET, SO_RCVBUF, (const char *)&nRecvBuf,sizeof(nRecvBuf));
 
     cv::Mat dispimg;
@@ -528,7 +528,7 @@ int main(int argc, char *argv[])
 
     //     cv::resize(img, img,cv::Size(640,640));
     //     cv::cvtColor(img,img,CV_BGR2YUV_I420);
-        
+
     //     // cv::imwrite("1.jpg", img);
     //     // return 0;
     //     inferOutputs.clear();
@@ -547,7 +547,7 @@ int main(int argc, char *argv[])
     // }
 
     // return 0;
-    
+
     int i=0;
     while(1)
     {
@@ -594,7 +594,7 @@ int main(int argc, char *argv[])
         if(sum == IMG_FRAME_SIZE)
         {
             // printf("frame cnt:%d\n", frameCnt++);
-            
+
             udpimg.data = imgBufRaw;
 
             stamp = std::chrono::system_clock::now();
@@ -612,7 +612,7 @@ int main(int argc, char *argv[])
             srcImage = udpimg.clone();
             cv::resize(udpimg,img,cv::Size(640,640));
             // cv::cvtColor(img,img,CV_BGR2GRAY);
-            
+
             // cv::imwrite("1.jpg", img);
             // return 0;
             inferOutputs.clear();
@@ -635,10 +635,9 @@ int main(int argc, char *argv[])
             // }
             // ii++;
             // printf("ii:%d\n", ii);
-            
             //cv::waitKey(1);
             memset(imgBufRaw, 0, IMG_FRAME_SIZE*sizeof(uint8_t));
-             
+
 
         } else {
             printf("error img data, sum:%d\n", sum);
@@ -647,7 +646,7 @@ int main(int argc, char *argv[])
         // if (allPath.size() == i){
         //     release = true;
         // }
-        
+
         // fileName = allPath.at(i).c_str();
 
         // ret = sampleYOLO.ProcessInput(fileName);
@@ -656,7 +655,7 @@ int main(int argc, char *argv[])
         //     return FAILED;
         // }
 
-        
+
         // return 0;
     }
     close(sockfdUDPSend);
