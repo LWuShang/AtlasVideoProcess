@@ -18,7 +18,10 @@
 #include <chrono>
 #include <yaml-cpp/yaml.h>
 #include <thread>
+#include <sstream>
+#include <chrono>
 #include "serial.h"
+#include "itracker.h"
 
 using namespace std;
 using namespace cv;
@@ -29,6 +32,19 @@ typedef enum Result {
 
 cv::Mat img;
 cv::Mat srcImage;
+itracker *m_stracker;
+bool trackOn = false;
+bool trackerInited = false;
+bool detectSwitch = false;
+string modectrlStr = "follow search";
+SelfCheckInstruction selfCheck;
+cv::Point crossCenterPtShift;
+cv::Point trackShiftPixelPt;
+int16_t missTargetX = 0;
+int16_t missTargetY = 0;
+cv::Point lastTrackTargetPt;
+int16_t trackTargetMoveSpeedX = 0;
+int16_t trackTargetMoveSpeedY = 0;
 
 typedef struct BoundBox {
     float x;
@@ -200,14 +216,34 @@ Result SampleYOLOV7::Inference(std::vector<InferenceOutput>& inferOutputs)
         return FAILED;
     }
 
+    // auto now1 = std::chrono::system_clock::now();
+    // auto curr1 = std::chrono::system_clock::to_time_t(now1);
+    // std::stringstream ss11;
+    // ss11 << std::put_time(std::localtime(&curr1), "%H:%M:%S");
+    // std::string currDate11(ss11.str());
+    // auto duration1 = now1.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
+    // auto millisecond1 = chrono::duration_cast<chrono::milliseconds>(duration1).count() % 1000; // 将时间转换为毫秒数并存储在变量中
+
+    //ACLLITE_LOG_INFO("ExecuteV2 before, time is %s.%ld", currDate11.c_str(), millisecond1);
+
+
     // inference
-    ret = model_.Execute(inferOutputs);
+    ret = model_.ExecuteV2(inferOutputs);
     if (ret != ACL_SUCCESS) {
         ACLLITE_LOG_ERROR("execute model failed, errorCode is %d", ret);
         return FAILED;
     }
 
+    model_.DestroyInput();
     return SUCCESS;
+}
+
+std::string ConvertNum2Str(double num)
+{
+    std::ostringstream oss;
+    oss<<setiosflags(ios::fixed)<<std::setprecision(3)<<num;
+    std::string str(oss.str());
+    return str;
 }
 
 Result SampleYOLOV7::GetResult(std::vector<InferenceOutput>& inferOutputs,
@@ -337,10 +373,10 @@ Result SampleYOLOV7::GetResult(std::vector<InferenceOutput>& inferOutputs,
     const uint32_t lineSolid = 2;
     const uint32_t labelOffset = 11;
     const cv::Scalar fountColor(0, 0, 255);
-    const vector <cv::Scalar> colors{
-        cv::Scalar(237, 149, 100), cv::Scalar(0, 215, 255),
-        cv::Scalar(50, 205, 50), cv::Scalar(139, 85, 26)};
-
+    // const vector <cv::Scalar> colors{
+    //     cv::Scalar(237, 149, 100), cv::Scalar(0, 215, 255),
+    //     cv::Scalar(50, 205, 50), cv::Scalar(139, 85, 26)};
+    const cv::Scalar color = cv::Scalar(0, 215, 255);
     int half = 2;
     for (size_t i = 0; i < result.size(); ++i) {
         cv::Point leftUpPoint, rightBottomPoint;
@@ -348,9 +384,10 @@ Result SampleYOLOV7::GetResult(std::vector<InferenceOutput>& inferOutputs,
         leftUpPoint.y = result[i].y - result[i].height / half;
         rightBottomPoint.x = result[i].x + result[i].width / half;
         rightBottomPoint.y = result[i].y + result[i].height / half;
-        cv::rectangle(srcImage, leftUpPoint, rightBottomPoint, colors[i % colors.size()], lineSolid);
+        // cv::rectangle(srcImage, leftUpPoint, rightBottomPoint, colors[i % colors.size()], lineSolid);
+        cv::rectangle(srcImage, leftUpPoint, rightBottomPoint, color, lineSolid);
         string className = label[result[i].classIndex];
-        string markString = to_string(result[i].score) + ":" + className;
+        string markString = ConvertNum2Str(result[i].score) + ":" + className;
         cv::putText(srcImage, markString, cv::Point(leftUpPoint.x, leftUpPoint.y + labelOffset),
                     cv::FONT_HERSHEY_COMPLEX, fountScale, fountColor);
     }
@@ -436,43 +473,78 @@ unsigned short MakeCRC_R_LookupShortTable(uint8_t *LpDate, uint8_t Len)
 
 
 //帧数据处理
-void processData(const uint8_t buf[]) {
-    SelfCheckInstruction selfCheck;
+void processAIRecvData(const uint8_t buf[]) {
     selfCheck.PowerOnSelfCheck = buf[7] & 0x01;
     selfCheck.PeriodicSelfCheck = (buf[7] & 0x02) >> 1;  //  (buf[7] & 0x02)?1:0
     selfCheck.ReadProductIdentifier = (buf[7] & 0x04) >> 2;  // (buf[7] & 0x04)?1:0
-    if(selfCheck.PowerOnSelfCheck) cout << "上电自检" << endl;
-    if(selfCheck.PeriodicSelfCheck) cout << "周期自检" << endl;
-    if(selfCheck.ReadProductIdentifier) cout << "读取产品标识码" << endl;
+    if (selfCheck.PowerOnSelfCheck) cout << "上电自检" << endl;
+    if (selfCheck.PeriodicSelfCheck) cout << "周期自检" << endl;
+    if (selfCheck.ReadProductIdentifier) cout << "读取产品标识码" << endl;
 
     ModeControlInstruction modectrl = ModeControlInstruction(buf[8]);
+
+    int16_t pixelOffsetX;
+    int16_t pixelOffsetY;
     switch (modectrl) {
         case ModeControlInstruction::FollowSearch:
             cout << "随动搜索" << endl;
+            modectrlStr = "follow search";
             break;
         case ModeControlInstruction::AutoSearch:
             cout << "自动搜索" << endl;
+            modectrlStr = "auto search";
             break;
         case ModeControlInstruction::ManualSearch:
             cout << "手动搜索" << endl;
+            modectrlStr = "manual search";
             break;
         case ModeControlInstruction::SnowPlowSearch:
             cout << "雪犁搜索" << endl;
+            modectrlStr = "snow plow search";
             break;
         case ModeControlInstruction::VideoTracking:
             cout << "视频跟踪" << endl;
+            modectrlStr = "video tracking";
+            trackOn = true;
+            trackerInited = false;
+
+            //跟踪偏移像素(X坐标, Y坐标)
+            pixelOffsetX = (buf[36] << 8) | buf[37];
+            pixelOffsetY = (buf[38] << 8) | buf[39];
+            cout << "偏移像素(X坐标):" <<pixelOffsetX<<", (Y坐标):"<<pixelOffsetY<<endl;
             break;
         case ModeControlInstruction::LightSpotSearch:
             cout << "光斑搜索" << endl;
+            modectrlStr = "light spot search";
             break;
         case ModeControlInstruction::LightSpotTracking:
             cout << "光斑跟踪" << endl;
+            modectrlStr = "light spot tracking";
+            trackOn = true;
+            trackerInited = false;
+            //光斑跟踪状态字
+            if(buf[40] == 0x00) {
+                cout << "无效值" << endl;
+            } else if(buf[40] == 0x01) {
+                cout << "未跟踪到目标" << endl;
+            } else if(buf[40] == 0x02) {
+                cout << "跟踪到目标" << endl;
+            } else if(buf[40] == 0x03) {
+                cout << "丢失目标" << endl;
+            }
+
+            //光斑跟踪(X坐标, Y坐标)
+            pixelOffsetX = (buf[42] << 8) | buf[43];
+            pixelOffsetY = (buf[44] << 8) | buf[45];
+            cout<<"光斑跟踪(X坐标):"<<pixelOffsetX<<" (Y坐标):"<<pixelOffsetY<<endl;
             break;
         case ModeControlInstruction::GeographicTrackingMode:
             cout << "地理跟踪模式" << endl;
+            modectrlStr = "geographic tracking mode";
             break;
         case ModeControlInstruction::MapMatching:
             cout << "地图匹配" << endl;
+            modectrlStr = "map matching";
             break;
         default:
             cout << "无效" << endl;
@@ -528,9 +600,16 @@ void processData(const uint8_t buf[]) {
     //识别开关
     uint8_t RecognitionSwitch = buf[13];
     bit0to1 = RecognitionSwitch & 0x03;
-    if(bit0to1 == 0) cout << "无效" << endl;
-    if(bit0to1 == 1) cout << "透传无识别(隐藏识别信息的字符,并保持SRIO识别信息上传)" << endl;
-    if(bit0to1 == 2) cout << "识别" << endl;
+    if(bit0to1 == 0) {
+        cout << "识别开关:关闭" << endl;
+        detectSwitch = false;
+    } else if(bit0to1 == 1) {
+        cout << "识别开关:透传无识别(隐藏识别信息的字符,并保持SRIO识别信息上传)" << endl;
+        detectSwitch = false;
+    } else if(bit0to1 == 2) {
+        cout << "识别开关:打开" << endl;
+        detectSwitch = true;
+    }
 
     int bit2to4 = (RecognitionSwitch >> 2) & 0x07;
     if(bit2to4 == 0) cout << "未知" << endl;
@@ -649,19 +728,7 @@ void processData(const uint8_t buf[]) {
 
     //帧时间
     string FrameTime;
-    uint16_t year = (buf[19] << 8) | buf[20];
-
-    //GNSS时间变换   年
-    double j = floor(year + 0.5);
-    double N = floor(4 * (j + 68549) / 146097);
-    double L1 = j + 68569 - floor((N * 146097 + 3) / 4);
-    double Y1 = floor(4000 * (L1 + 1) / 1461001);
-    double L2 = L1 - floor((1461 * Y1) / 4) + 31;
-    double M1 = floor(80 * L2 / 2447);
-    double D = L2 - floor(2447 * M1 / 80);
-    double L3 = floor(M1 / 11);
-    int Y = floor(100 * (N - 49) + Y1 + L3);
-
+    uint16_t year = buf[19] * 100 + buf[20];
     uint8_t month = buf[21];
     uint8_t day = buf[22];
     uint8_t hours = buf[23];
@@ -669,7 +736,7 @@ void processData(const uint8_t buf[]) {
     uint8_t second = buf[25];
     uint8_t millisecond = buf[26];
 
-    printf("%4d年%d月%d日\t%d:%d:%d:%d\n", Y, month, day,hours, minutes, second,millisecond);
+    printf("%4d年%2d月%2d日\t%2d:%2d:%02d:%02d\n", year, month, day, hours, minutes, second, millisecond);
 
     //激光测距时间
     uint8_t distanceMeasurementTime = buf[27];
@@ -700,24 +767,124 @@ void processData(const uint8_t buf[]) {
     //十字线偏移(X坐标, Y坐标)
     int crosshairOffsetX = buf[33];
     int crosshairOffsetY = buf[34];
+    crossCenterPtShift.x = crosshairOffsetX;
+    crossCenterPtShift.y = crosshairOffsetY;
     cout<<"十字线偏移(X坐标):"<<crosshairOffsetX<<", (Y坐标):"<<crosshairOffsetY<<endl;
 
-    //偏移像素(X坐标, Y坐标)
-    int16_t pixelOffsetX = (buf[36] << 8) | buf[37];
-    int16_t pixelOffsetY = (buf[38] << 8) | buf[39];
-    cout << "偏移像素(X坐标):" <<pixelOffsetX<<", (Y坐标):"<<pixelOffsetY<<endl;
+    // 跟踪目标坐标值
+    trackShiftPixelPt.x = pixelOffsetX;
+    trackShiftPixelPt.y = pixelOffsetY;
 
-    //光斑跟踪状态字
-    uint8_t spotTrackingStateWord = buf[40];
-    if(spotTrackingStateWord == 0x00) cout << "无效值" << endl;
-    else if(spotTrackingStateWord == 0x01) cout << "未跟踪到目标" << endl;
-    else if(spotTrackingStateWord == 0x02) cout << "跟踪到目标" << endl;
-    else if(spotTrackingStateWord == 0x03) cout << "丢失目标" << endl;
+}
 
-    //光斑跟踪(X坐标, Y坐标)
-    int16_t lightSpotTrackingX = (buf[42] << 8) | buf[43];
-    int16_t lightSpotTrackingY = (buf[44] << 8) | buf[45];
-    cout<<"光斑跟踪(X坐标):"<<lightSpotTrackingX<<" (Y坐标):"<<lightSpotTrackingY<<endl;
+struct TimeStruct {
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+    uint16_t millisecond;
+};
+
+void GetCurrTime(TimeStruct *time)
+{
+    auto now = std::chrono::system_clock::now();
+    auto curr = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&curr), "%y");
+    std::string currDate(ss.str());
+    time->year = std::stoi(currDate);
+    std::stringstream ss1;
+    ss1 << std::put_time(std::localtime(&curr), "%m");
+    std::string currDate1(ss1.str());
+    time->month = std::stoi(currDate1);
+    std::stringstream ss2;
+    ss2 << std::put_time(std::localtime(&curr), "%d");
+    std::string currDate2(ss2.str());
+    time->day = std::stoi(currDate2);
+    std::stringstream ss3;
+    ss3 << std::put_time(std::localtime(&curr), "%H");
+    std::string currDate3(ss3.str());
+    time->hour = std::stoi(currDate3);
+    std::stringstream ss4;
+    ss4 << std::put_time(std::localtime(&curr), "%M");
+    std::string currDate4(ss4.str());
+    time->minute = std::stoi(currDate4);
+    std::stringstream ss5;
+    ss5 << std::put_time(std::localtime(&curr), "%S");
+    std::string currDate5(ss5.str());
+    time->second = std::stoi(currDate5);
+     // 获取当前毫秒
+    auto duration = now.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
+    time->millisecond = chrono::duration_cast<chrono::milliseconds>(duration).count() % 1000; // 将时间转换为毫秒数并存储在变量中
+    //printf("------------%d-%d-%d-%d-%d-%d-%d\n", time->year, time->month, time->day, time->hour, time->minute, time->second, time->millisecond);
+}
+
+struct Uint8Data {
+    uint8_t data[2];
+};
+
+union UnionData {
+    int16_t int16Data;
+    Uint8Data uint8Data;
+};
+
+void AssembleSendData(uint8_t *sendTo)
+{
+    if (selfCheck.PowerOnSelfCheck) {
+        sendTo[7] = 0x1;
+    }
+
+    if (selfCheck.PeriodicSelfCheck) {
+        sendTo[7] = sendTo[7] | 0x2;
+    }
+
+    if (!trackOn && !trackerInited) {
+        sendTo[11] = 0x00;
+    } else if (trackOn && trackerInited) {
+        sendTo[11] = 0x02;
+    } else {
+        sendTo[11] = 0x03;
+    }
+
+    if (selfCheck.ReadProductIdentifier) {
+        sendTo[13] = 1;
+        sendTo[14] = 1;
+        sendTo[15] = 23;
+        sendTo[16] = 12;
+        sendTo[17] = 26;
+    }
+
+    TimeStruct time;
+    GetCurrTime(&time);
+    sendTo[19] = 0x14;        // 20xx
+    sendTo[20] = time.year;   // xx23
+    sendTo[21] = time.month;
+    sendTo[22] = time.day;
+    sendTo[23] = time.hour;
+    sendTo[24] = time.minute;
+    sendTo[25] = time.second;
+    sendTo[26] = time.millisecond / 10;
+
+    if (trackOn) {
+        UnionData unionDataX = {0};
+        UnionData unionDataY = {0};
+        unionDataX.int16Data = missTargetX;
+        unionDataY.int16Data = missTargetY;
+        sendTo[28] = unionDataX.uint8Data.data[1];
+        sendTo[29] = unionDataX.uint8Data.data[0];
+        sendTo[30] = unionDataY.uint8Data.data[1];
+        sendTo[31] = unionDataY.uint8Data.data[0];
+        sendTo[32] = 0;
+        sendTo[33] = trackTargetMoveSpeedX;
+        sendTo[34] = 0;
+        sendTo[35] = trackTargetMoveSpeedY;
+        sendTo[36] = 0;
+        sendTo[37] = 32;
+        sendTo[38] = 0;
+        sendTo[39] = 32;
+    }
 }
 
 // AI板发给主控422串口数据
@@ -728,13 +895,20 @@ void AISend()
     uint8_t sendTo[58] = {0xEB, 0x90, sendNum, 0x2E, 0x09};
     sendTo[54] = 0x5A;
     sendTo[55] = 0x5A;
+
+
     while (1) {
-        int64_t ret = obj->serial_send(sendTo, len);         // 串口发送数据
-        printf("send data:");
-        for (int i = 0; i < ret; i++) {
-            printf("[%02X]", sendTo[i]);
+        if (detectSwitch || trackOn) {
+
+            AssembleSendData(sendTo);
+
+            int64_t ret = obj->serial_send(sendTo, len);         // 串口发送数据
+            printf("send data:");
+            for (int i = 0; i < ret; i++) {
+                printf("[%02X]", sendTo[i]);
+            }
+            printf("\n");
         }
-        printf("\n");
     }
     if (sendNum == 0xFF) {
         sendNum = 0x01;
@@ -762,6 +936,7 @@ void AIRecv()
             if(recFrom[0]==0xEB && recFrom[1]==0x90) {
                 uint16_t crc = MakeCRC_R_LookupShortTable((uint8_t*)(recFrom + 4), len - 6 );
                 uint16_t receivedCRC = (recFrom[len - 1] << 8) | recFrom[len - 2];
+                cout <<crc<<endl;
                 // 开始校验
                 if (crc == receivedCRC) {
                     printf("recieve data check succeed\nrecieve data:");
@@ -769,7 +944,7 @@ void AIRecv()
                         printf("[%02X]", recFrom[i]);
                     }
                     printf("\n");
-                    processData(recFrom);
+                    processAIRecvData(recFrom);
                     ++msgSum;
                 } else {
                     printf("recieve data check fail\n data:");
@@ -815,7 +990,7 @@ void AIRecv()
                                 printf("[%02X]", buf[i]);
                             }
                             printf("\n");
-                            processData(recFrom);   //处理数据
+                            processAIRecvData(recFrom);   //处理数据
                             ++msgSum;
                         } else {
                             printf("recieve data check fail\n data:");
@@ -838,20 +1013,153 @@ void AIRecv()
 }
 /***************************串口通信函数结束*******************************/
 
+static std::string ConvertDegreesNum2Str(double num, const char type)
+{
+    std::ostringstream oss;
+    if (type == 'd') {
+        oss << num;
+    } else if (type == 'm') {
+        if (abs(num) < 10) {
+            oss <<std::setw(2)<<std::setfill('0')<<num;
+        } else {
+            oss << num;
+        }
+    } else {
+        if (num == 0) {
+            oss <<std::setw(1)<<std::setfill('0')<<num;
+            oss<<setiosflags(ios::fixed)<<std::setprecision(2)<<num;
+        } else if (ceil(num) == floor(num) && num != 0 && num < 10) {
+            char strNum[64];
+            sprintf(strNum, "%d%.2f\n", (int)num / 10, num);
+            oss<<strNum;
+        } else {
+            oss<<setiosflags(ios::fixed)<<std::setprecision(2)<<num;
+        }
+
+    }
+
+    std::string str(oss.str());
+    return str;
+}
+
+static void ConvertAngleUnits(const double input, int *degrees, int *minutes, int *seconds)
+{
+    *degrees = floor(input);
+    *minutes = floor((input - *degrees) * 60);
+    *seconds = (input - *degrees) * 3600 - *minutes * 60;
+}
+
+// 绘制度分秒 1°00′00.00″
+static std::string GetDegMinSec(const double inputAngle)
+{
+    int degrees = 0;
+    int minutes = 0;
+    int seconds = 0;
+    ConvertAngleUnits(abs(inputAngle), &degrees, &minutes, &seconds);
+    std::string currDeg = ConvertDegreesNum2Str(degrees, 'd') + "deg" + ConvertDegreesNum2Str(minutes, 'm') + "'" + ConvertDegreesNum2Str(seconds, 's') + "''";
+    return currDeg;
+}
+
+std::string ConvertTimesNum2Str(double num)
+{
+    std::ostringstream oss;
+    oss<<setiosflags(ios::fixed)<<std::setprecision(1)<<num;
+    std::string str(oss.str());
+    return str;
+}
+
+void PaintOSD(cv::Mat &img)
+{
+    // OSD 字体宽度
+    int fontThickness = 1;
+
+    // OSD字体大小
+    double fontSize = 0.5;
+
+    // OSD 颜色
+    cv::Scalar osdColor = cv::Scalar(0, 255, 255);
+
+    //方位标识
+    int directX = img.cols / 23 * 22;
+    int directY = img.rows / 3;
+    cv::arrowedLine(img, cv::Point(directX, directY), cv::Point(directX, directY - 60), osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "N", cv::Point(directX - 20, directY - 30), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+
+    // 获取文本所需的边界框信息
+    cv::Size modectrlStrSize = cv::getTextSize(modectrlStr, cv::FONT_HERSHEY_SIMPLEX, fontSize, fontThickness, NULL);
+    int modectrlStrX = (img.cols - modectrlStrSize.width) / 2;
+    int modectrlStrY = (img.rows + modectrlStrSize.height) / 10;
+    cv::putText(img, modectrlStr, cv::Point(modectrlStrX, modectrlStrY), cv::FONT_HERSHEY_SIMPLEX, fontSize + 0.2, osdColor, fontThickness, cv::LINE_AA);
+
+    int timeX = img.cols / 23;
+    int timeY = img.rows / 10;
+    std::time_t curr = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&curr), "%Y/%m/%d %H:%M:%S");
+    std::string currDate(ss.str());
+    cv::putText(img, currDate, cv::Point(timeX, timeY), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+
+    // 载机信息绘制
+    int carryX = img.cols / 23;
+    int carryY = img.rows / 5 * 4;
+    double acftE = 0;
+    double acftN = 0;
+    int acftH = 0;
+    int acftYaw = 0;
+    int acftPitch = 0;
+    int acftRollAngle = 0;
+    cv::putText(img, "ACFT", cv::Point(carryX, carryY), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "E: " + GetDegMinSec(acftE), cv::Point(carryX, carryY + 20), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "N: " + GetDegMinSec(acftN), cv::Point(carryX, carryY + 40), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "H: " + ConvertNum2Str(acftH) + "m", cv::Point(carryX, carryY + 60), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Yaw: " + ConvertNum2Str(acftYaw) + "deg", cv::Point(carryX, carryY + 90), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Pitch: " + ConvertNum2Str(acftPitch) + "deg", cv::Point(carryX, carryY + 110), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Roll: " + ConvertNum2Str(acftRollAngle) + "deg", cv::Point(carryX, carryY + 130), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+
+    // 伺服信息绘制
+    int servoX = img.cols / 23 * 20;
+    int servoY = img.rows / 13 * 12;
+    int servoYaw = 0;
+    int servoPitch = 0;
+    cv::putText(img, "SERVO", cv::Point(servoX, servoY), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Yaw: " + ConvertNum2Str(servoYaw) + "deg", cv::Point(servoX, servoY + 20), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Pitch :" + ConvertNum2Str(servoPitch) + "deg", cv::Point(servoX, servoY + 40), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+
+    // 绘制中心十字
+    int crossX = img.cols / 2 + crossCenterPtShift.x;
+    int crossY = img.rows / 2 + crossCenterPtShift.y;
+    int lineLen = img.rows / 12;
+
+    // 绘制x线
+    cv::line(img, cv::Point(crossX - lineLen, crossY), cv::Point(crossX - lineLen / 4, crossY), osdColor, fontThickness, cv::LINE_AA);
+    cv::line(img, cv::Point(crossX + lineLen, crossY), cv::Point(crossX + lineLen / 4, crossY), osdColor, fontThickness, cv::LINE_AA);
+
+    // 绘制中心点
+    cv::circle(img, cv::Point(crossX, crossY), 2, osdColor, fontThickness, cv::LINE_AA);
+
+    // 绘制y线
+    cv::line(img, cv::Point(crossX, crossY - lineLen), cv::Point(crossX, crossY - lineLen / 4), osdColor, fontThickness, cv::LINE_AA);
+    cv::line(img, cv::Point(crossX, crossY + lineLen), cv::Point(crossX, crossY + lineLen / 4), osdColor, fontThickness, cv::LINE_AA);
+
+    // 视场
+    int viewX = img.cols / 23 * 22;
+    int viewY = img.rows / 2;
+    int fieldOfView = 0;
+    cv::putText(img, "Zoom", cv::Point(viewX, viewY), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, ConvertTimesNum2Str(fieldOfView) + "X", cv::Point(viewX, viewY + 20), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+}
+
 int IMG_FRAME_SIZE = 640*512;
 
 int main(int argc, char *argv[])
 {
     if (argc != 2) {
-        ACLLITE_LOG_ERROR("miss exec para, ex: './main localvideoshow/localvideodet/ethvideoshow/ethvideodet'\n");
+        ACLLITE_LOG_ERROR("miss exec para, ex: './main localvideo/ethvideo'\n");
     }
     string inParam = argv[1];
 
-    if ((inParam != "localvideoshow") &&
-        (inParam != "localvideodet") &&
-        (inParam != "ethvideoshow") &&
-        (inParam != "ethvideodet")) {
-        ACLLITE_LOG_ERROR("exec para error, ex: './main localvideoshow/localvideodet/ethvideoshow/ethvideodet'\n");
+    if ((inParam != "localvideo") && (inParam != "ethvideo")) {
+        ACLLITE_LOG_ERROR("exec para error, ex: './main localvideo/ethvideo'\n");
         return FAILED;
     }
 
@@ -862,8 +1170,7 @@ int main(int argc, char *argv[])
     bool findHeader = false;
     cv::Mat udpimg = cv::Mat(512,640,CV_8UC1);
     ACLLITE_LOG_INFO("exec %s program\n", inParam.c_str());
-    if (inParam == "ethvideoshow" || inParam == "ethvideodet") {
-
+    if (inParam == "ethvideo") {
         imgBufRaw = (uint8_t*)malloc(IMG_FRAME_SIZE*sizeof(uint8_t));
 
         // 创建UDP套接字
@@ -925,8 +1232,11 @@ int main(int argc, char *argv[])
     std::vector<InferenceOutput> inferOutputs;
     InitUDPSendInfo();
 
+    m_stracker = new itracker();
+    m_stracker->setGateSize(32);
+    bool isTrackLost = true;
     /*  local video process*/
-    if (inParam == "localvideoshow" || inParam == "localvideodet") {
+    if (inParam == "localvideo") {
         std::string videopath = "/home/HwHiAiUser/Videos/1.mp4";
         cv::VideoCapture *cvcap = new cv::VideoCapture(videopath);
         while(1) {
@@ -934,8 +1244,40 @@ int main(int argc, char *argv[])
             if(img.empty()) {
                 continue;
             }
+            //img = img(cv::Rect(426,190,424,335)).clone();
 
-            if (inParam != "localvideodet") {
+            if (trackOn) {
+                if (!trackerInited) {
+                    m_stracker->reset();
+                    if (trackShiftPixelPt.x == 0 || trackShiftPixelPt.y == 0) {
+                        trackShiftPixelPt = cv::Point(img.cols / 2, img.rows / 2);
+                    }
+                    m_stracker->init(trackShiftPixelPt, img);
+                    trackerInited = true;
+                    lastTrackTargetPt = cv::Point(img.cols / 2, img.rows / 2);
+                } else {
+                    if (m_stracker->isLost()) {
+                        m_stracker->reset();
+                        trackOn = false;
+                        trackerInited = false;
+                    }
+                    cv::Rect kcfResult = m_stracker->update(img);
+                    cv::Point trackerCenterPt = m_stracker->centerPt();
+                    missTargetX = trackerCenterPt.x - img.cols / 2;
+                    missTargetY = trackerCenterPt.y - img.rows / 2;
+                    trackTargetMoveSpeedX = (trackerCenterPt.x - lastTrackTargetPt.x) * 30 * 0.0001;
+                    trackTargetMoveSpeedY = (trackerCenterPt.y - lastTrackTargetPt.y) * 30 * 0.0001;
+                    lastTrackTargetPt = trackerCenterPt;
+                    rectangle(img, cv::Point(kcfResult.x, kcfResult.y ),
+                        cv::Point( kcfResult.x+kcfResult.width, kcfResult.y+kcfResult.height),
+                        cv::Scalar(145,79,59), 3, 8);
+                }
+
+            }
+
+            PaintOSD(img);
+
+            if (!detectSwitch) {
                 UdpSendVideo(img);
                 continue;
             }
@@ -947,25 +1289,53 @@ int main(int argc, char *argv[])
             cv::resize(img, img,cv::Size(640,640));
             cv::cvtColor(img,img,CV_BGR2YUV_I420);
             inferOutputs.clear();
+
+
+            // auto now1 = std::chrono::system_clock::now();
+            // auto curr1 = std::chrono::system_clock::to_time_t(now1);
+            // std::stringstream ss11;
+            // ss11 << std::put_time(std::localtime(&curr1), "%H:%M:%S");
+            // std::string currDate11(ss11.str());
+            // auto duration1 = now1.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
+            // auto millisecond1 = chrono::duration_cast<chrono::milliseconds>(duration1).count() % 1000; // 将时间转换为毫秒数并存储在变量中
+
+            // ACLLITE_LOG_INFO("Inference before, time is %s.%ld", currDate11.c_str(), millisecond1);
             ret = sampleYOLO.Inference(inferOutputs);
             if (ret == FAILED) {
                 ACLLITE_LOG_ERROR("Inference failed, errorCode is %d", ret);
                 return FAILED;
             }
 
+            // auto now2 = std::chrono::system_clock::now();
+            // auto curr2 = std::chrono::system_clock::to_time_t(now2);
+            // std::stringstream ss12;
+            // ss12 << std::put_time(std::localtime(&curr2), "%H:%M:%S");
+            // std::string currDate12(ss12.str());
+            // auto duration2 = now2.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
+            // auto millisecond2 = chrono::duration_cast<chrono::milliseconds>(duration2).count() % 1000; // 将时间转换为毫秒数并存储在变量中
+            // ACLLITE_LOG_INFO("Inference after, time is %s.%ld", currDate12.c_str(), millisecond2);
             int i=0;
             ret = sampleYOLO.GetResult(inferOutputs, fileName, i, release);
             if (ret == FAILED) {
                 ACLLITE_LOG_ERROR("GetResult failed, errorCode is %d", ret);
                 return FAILED;
             }
+
+            // auto now3 = std::chrono::system_clock::now();
+            // auto curr3 = std::chrono::system_clock::to_time_t(now3);
+            // std::stringstream ss13;
+            // ss13 << std::put_time(std::localtime(&curr3), "%H:%M:%S");
+            // std::string currDate13(ss13.str());
+            // auto duration3 = now3.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
+            // auto millisecond3 = chrono::duration_cast<chrono::milliseconds>(duration3).count() % 1000; // 将时间转换为毫秒数并存储在变量中
+            // ACLLITE_LOG_INFO("GetResult after, time is %s.%ld", currDate13.c_str(), millisecond3);
         }
         close(sockfdUDPSend);
         return SUCCESS;
     }
 
     /*  eth video process*/
-    if (inParam != "ethvideoshow" && inParam != "ethvideodet") {
+    if (inParam != "ethvideo") {
         ACLLITE_LOG_ERROR("current exec program isn't eth video program\n");
         close(sockfdUDPSend);
         return FAILED;
@@ -1009,7 +1379,39 @@ int main(int argc, char *argv[])
             laststamp = stamp;
             std::cout<<"time interval:"<< duration.count() << "ms"<<std::endl;
 
-            if (inParam == "ethvideodet") {
+            if (trackOn) {
+                if (m_stracker->isLost()) {
+                    m_stracker->reset();
+                    trackOn = false;
+                    trackerInited = false;
+                    break;
+                }
+
+                if (!trackerInited) {
+                    m_stracker->reset();
+                    if (trackShiftPixelPt.x == 0 || trackShiftPixelPt.y == 0) {
+                        trackShiftPixelPt = cv::Point(img.cols / 2, img.rows / 2);
+                    }
+                    m_stracker->init(trackShiftPixelPt, udpimg);
+                    trackerInited = true;
+                    lastTrackTargetPt = cv::Point(img.cols / 2, img.rows / 2);
+                } else {
+                    cv::Rect kcfResult = m_stracker->update(udpimg);
+                    cv::Point trackerCenterPt = m_stracker->centerPt();
+                    missTargetX = trackerCenterPt.x - img.cols / 2;
+                    missTargetY = trackerCenterPt.y - img.rows / 2;
+                    trackTargetMoveSpeedX = (trackerCenterPt.x - lastTrackTargetPt.x) * 30 * 0.0001;
+                    trackTargetMoveSpeedY = (trackerCenterPt.y - lastTrackTargetPt.y) * 30 * 0.0001;
+                    lastTrackTargetPt = trackerCenterPt;
+                    rectangle(udpimg, cv::Point(kcfResult.x, kcfResult.y ),
+                        cv::Point( kcfResult.x+kcfResult.width, kcfResult.y+kcfResult.height),
+                        cv::Scalar(145,79,59), 3, 8);
+                }
+            }
+
+            PaintOSD(udpimg);
+            //detectSwitch = true;
+            if (detectSwitch) {
                 srcImage = udpimg.clone();
                 cv::resize(udpimg,img,cv::Size(640,640));
                 inferOutputs.clear();
