@@ -216,17 +216,6 @@ Result SampleYOLOV7::Inference(std::vector<InferenceOutput>& inferOutputs)
         return FAILED;
     }
 
-    // auto now1 = std::chrono::system_clock::now();
-    // auto curr1 = std::chrono::system_clock::to_time_t(now1);
-    // std::stringstream ss11;
-    // ss11 << std::put_time(std::localtime(&curr1), "%H:%M:%S");
-    // std::string currDate11(ss11.str());
-    // auto duration1 = now1.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
-    // auto millisecond1 = chrono::duration_cast<chrono::milliseconds>(duration1).count() % 1000; // 将时间转换为毫秒数并存储在变量中
-
-    //ACLLITE_LOG_INFO("ExecuteV2 before, time is %s.%ld", currDate11.c_str(), millisecond1);
-
-
     // inference
     ret = model_.ExecuteV2(inferOutputs);
     if (ret != ACL_SUCCESS) {
@@ -376,7 +365,7 @@ Result SampleYOLOV7::GetResult(std::vector<InferenceOutput>& inferOutputs,
     // const vector <cv::Scalar> colors{
     //     cv::Scalar(237, 149, 100), cv::Scalar(0, 215, 255),
     //     cv::Scalar(50, 205, 50), cv::Scalar(139, 85, 26)};
-    const cv::Scalar color = cv::Scalar(0, 215, 255);
+    const cv::Scalar color = cv::Scalar(50, 205, 50);
     int half = 2;
     for (size_t i = 0; i < result.size(); ++i) {
         cv::Point leftUpPoint, rightBottomPoint;
@@ -413,19 +402,11 @@ void SampleYOLOV7::ReleaseResource()
 
 bool IsHeader(uint8_t* buf)
 {
-    for(int i=0;i<4;i+=4)
-    {
-        // if(!(buf[i] == 0xdf && buf[i+1] == 0x0d && buf[i+2] == 0x76 && buf[i+3] == 0x7b))
-        if(!(buf[i] == 0x7b && buf[i+1] == 0x76 && buf[i+2] == 0x0d && buf[i+3] == 0xdf))
-        {
+    for(int i=0;i<4;i+=4) {
+        if(!(buf[i] == 0x7b && buf[i+1] == 0x76 && buf[i+2] == 0x0d && buf[i+3] == 0xdf)) {
             return false;
         }
     }
-    // int i = 0xdf0d767b;
-    // if(i == *((int*)buf))
-    //     return true;
-    // else
-    //     return false;
 
     return true;
 }
@@ -1290,45 +1271,18 @@ int main(int argc, char *argv[])
             cv::cvtColor(img,img,CV_BGR2YUV_I420);
             inferOutputs.clear();
 
-
-            // auto now1 = std::chrono::system_clock::now();
-            // auto curr1 = std::chrono::system_clock::to_time_t(now1);
-            // std::stringstream ss11;
-            // ss11 << std::put_time(std::localtime(&curr1), "%H:%M:%S");
-            // std::string currDate11(ss11.str());
-            // auto duration1 = now1.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
-            // auto millisecond1 = chrono::duration_cast<chrono::milliseconds>(duration1).count() % 1000; // 将时间转换为毫秒数并存储在变量中
-
-            // ACLLITE_LOG_INFO("Inference before, time is %s.%ld", currDate11.c_str(), millisecond1);
             ret = sampleYOLO.Inference(inferOutputs);
             if (ret == FAILED) {
                 ACLLITE_LOG_ERROR("Inference failed, errorCode is %d", ret);
                 return FAILED;
             }
 
-            // auto now2 = std::chrono::system_clock::now();
-            // auto curr2 = std::chrono::system_clock::to_time_t(now2);
-            // std::stringstream ss12;
-            // ss12 << std::put_time(std::localtime(&curr2), "%H:%M:%S");
-            // std::string currDate12(ss12.str());
-            // auto duration2 = now2.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
-            // auto millisecond2 = chrono::duration_cast<chrono::milliseconds>(duration2).count() % 1000; // 将时间转换为毫秒数并存储在变量中
-            // ACLLITE_LOG_INFO("Inference after, time is %s.%ld", currDate12.c_str(), millisecond2);
             int i=0;
             ret = sampleYOLO.GetResult(inferOutputs, fileName, i, release);
             if (ret == FAILED) {
                 ACLLITE_LOG_ERROR("GetResult failed, errorCode is %d", ret);
                 return FAILED;
             }
-
-            // auto now3 = std::chrono::system_clock::now();
-            // auto curr3 = std::chrono::system_clock::to_time_t(now3);
-            // std::stringstream ss13;
-            // ss13 << std::put_time(std::localtime(&curr3), "%H:%M:%S");
-            // std::string currDate13(ss13.str());
-            // auto duration3 = now3.time_since_epoch(); // 计算从 epoch 到现在经过了多少时间
-            // auto millisecond3 = chrono::duration_cast<chrono::milliseconds>(duration3).count() % 1000; // 将时间转换为毫秒数并存储在变量中
-            // ACLLITE_LOG_INFO("GetResult after, time is %s.%ld", currDate13.c_str(), millisecond3);
         }
         close(sockfdUDPSend);
         return SUCCESS;
