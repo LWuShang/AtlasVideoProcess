@@ -23,3 +23,19 @@ ll /usr/local/lib/libyaml-cpp.a
 
 ```
 若存在则表示安装成功
+
+6.安装KCFcpp-master
+#下载KCFcpp-mster源码
+```
+https://github.com/LeRoii/robusttracker/tree/main/KCFcpp-master
+(直接下载KCFcpp-mster压缩包）
+```
+编译安装KCFcpp-master
+```
+cd KCFcpp-master
+mkdir build
+cd build
+cmake ..
+sudo make
+make install
+```

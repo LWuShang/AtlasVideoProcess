@@ -49,7 +49,7 @@ link_directories(
 find_package(OpenCV)
 find_package(yaml-cpp REQUIRED)
 
-add_executable(main sampleYOLOV7.cpp serial.cpp)
+add_executable(main main.cpp serial.cpp model_process.cpp object_detect.cpp utils.cpp)
 
 if(target STREQUAL "Simulator_Function")
     target_link_libraries(main funcsim)

@@ -5,7 +5,6 @@
 #include "AclLiteResource.h"
 #include "AclLiteError.h"
 #include "AclLiteModel.h"
-#include "label.h"
 #include "AclLiteVideoProc.h"
 #include <opencv2/imgproc/types_c.h>
 #include <iostream>
@@ -14,21 +13,16 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <string.h>
-#include <opencv2/opencv.hpp>
-#include <chrono>
 #include <yaml-cpp/yaml.h>
 #include <thread>
-#include <sstream>
-#include <chrono>
 #include "serial.h"
 #include "itracker.h"
+#include "object_detect.h"
+#include "utils.h"
+#include "common.h"
 
 using namespace std;
 using namespace cv;
-typedef enum Result {
-    SUCCESS = 0,
-    FAILED = 1
-} Result;
 
 cv::Mat img;
 cv::Mat srcImage;
@@ -191,6 +185,8 @@ void UdpSendVideo(cv::Mat &image)
     std::vector<int> quality;
     quality.push_back(cv::IMWRITE_JPEG_QUALITY);
     quality.push_back(30);//进行50%的压缩
+    cv::resize(image, image,cv::Size(640,512));
+    PaintOSD(img);
     cv::imencode(".jpg", image, imageData, quality);//将图像编码
 
     int nSize = imageData.size();
@@ -227,17 +223,10 @@ Result SampleYOLOV7::Inference(std::vector<InferenceOutput>& inferOutputs)
     return SUCCESS;
 }
 
-std::string ConvertNum2Str(double num)
-{
-    std::ostringstream oss;
-    oss<<setiosflags(ios::fixed)<<std::setprecision(3)<<num;
-    std::string str(oss.str());
-    return str;
-}
-
 Result SampleYOLOV7::GetResult(std::vector<InferenceOutput>& inferOutputs,
                                string imagePath, size_t imageIndex, bool release)
 {
+#if 0
     uint32_t outputDataBufId = 0;
     float *classBuff = static_cast<float *>(inferOutputs[outputDataBufId].data.get());
     // confidence threshold
@@ -376,7 +365,7 @@ Result SampleYOLOV7::GetResult(std::vector<InferenceOutput>& inferOutputs,
         // cv::rectangle(srcImage, leftUpPoint, rightBottomPoint, colors[i % colors.size()], lineSolid);
         cv::rectangle(srcImage, leftUpPoint, rightBottomPoint, color, lineSolid);
         string className = label[result[i].classIndex];
-        string markString = ConvertNum2Str(result[i].score) + ":" + className;
+        string markString = Utils::ConvertNum2Str(result[i].score) + ":" + className;
         cv::putText(srcImage, markString, cv::Point(leftUpPoint.x, leftUpPoint.y + labelOffset),
                     cv::FONT_HERSHEY_COMPLEX, fountScale, fountColor);
     }
@@ -390,7 +379,9 @@ Result SampleYOLOV7::GetResult(std::vector<InferenceOutput>& inferOutputs,
         free(classBuff);
         classBuff = nullptr;
     }
+#endif
     return SUCCESS;
+
 }
 
 void SampleYOLOV7::ReleaseResource()
@@ -884,11 +875,11 @@ void AISend()
             AssembleSendData(sendTo);
 
             int64_t ret = obj->serial_send(sendTo, len);         // 串口发送数据
-            printf("send data:");
-            for (int i = 0; i < ret; i++) {
-                printf("[%02X]", sendTo[i]);
-            }
-            printf("\n");
+            // printf("send data:");
+            // for (int i = 0; i < ret; i++) {
+            //     printf("[%02X]", sendTo[i]);
+            // }
+            // printf("\n");
         }
     }
     if (sendNum == 0xFF) {
@@ -994,68 +985,13 @@ void AIRecv()
 }
 /***************************串口通信函数结束*******************************/
 
-static std::string ConvertDegreesNum2Str(double num, const char type)
-{
-    std::ostringstream oss;
-    if (type == 'd') {
-        oss << num;
-    } else if (type == 'm') {
-        if (abs(num) < 10) {
-            oss <<std::setw(2)<<std::setfill('0')<<num;
-        } else {
-            oss << num;
-        }
-    } else {
-        if (num == 0) {
-            oss <<std::setw(1)<<std::setfill('0')<<num;
-            oss<<setiosflags(ios::fixed)<<std::setprecision(2)<<num;
-        } else if (ceil(num) == floor(num) && num != 0 && num < 10) {
-            char strNum[64];
-            sprintf(strNum, "%d%.2f\n", (int)num / 10, num);
-            oss<<strNum;
-        } else {
-            oss<<setiosflags(ios::fixed)<<std::setprecision(2)<<num;
-        }
-
-    }
-
-    std::string str(oss.str());
-    return str;
-}
-
-static void ConvertAngleUnits(const double input, int *degrees, int *minutes, int *seconds)
-{
-    *degrees = floor(input);
-    *minutes = floor((input - *degrees) * 60);
-    *seconds = (input - *degrees) * 3600 - *minutes * 60;
-}
-
-// 绘制度分秒 1°00′00.00″
-static std::string GetDegMinSec(const double inputAngle)
-{
-    int degrees = 0;
-    int minutes = 0;
-    int seconds = 0;
-    ConvertAngleUnits(abs(inputAngle), &degrees, &minutes, &seconds);
-    std::string currDeg = ConvertDegreesNum2Str(degrees, 'd') + "deg" + ConvertDegreesNum2Str(minutes, 'm') + "'" + ConvertDegreesNum2Str(seconds, 's') + "''";
-    return currDeg;
-}
-
-std::string ConvertTimesNum2Str(double num)
-{
-    std::ostringstream oss;
-    oss<<setiosflags(ios::fixed)<<std::setprecision(1)<<num;
-    std::string str(oss.str());
-    return str;
-}
-
 void PaintOSD(cv::Mat &img)
 {
     // OSD 字体宽度
     int fontThickness = 1;
 
     // OSD字体大小
-    double fontSize = 0.5;
+    double fontSize = 0.4;
 
     // OSD 颜色
     cv::Scalar osdColor = cv::Scalar(0, 255, 255);
@@ -1063,7 +999,7 @@ void PaintOSD(cv::Mat &img)
     //方位标识
     int directX = img.cols / 23 * 22;
     int directY = img.rows / 3;
-    cv::arrowedLine(img, cv::Point(directX, directY), cv::Point(directX, directY - 60), osdColor, fontThickness, cv::LINE_AA);
+    cv::arrowedLine(img, cv::Point(directX, directY), cv::Point(directX, directY - 50), osdColor, fontThickness, cv::LINE_AA);
     cv::putText(img, "N", cv::Point(directX - 20, directY - 30), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
 
     // 获取文本所需的边界框信息
@@ -1090,21 +1026,21 @@ void PaintOSD(cv::Mat &img)
     int acftPitch = 0;
     int acftRollAngle = 0;
     cv::putText(img, "ACFT", cv::Point(carryX, carryY), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, "E: " + GetDegMinSec(acftE), cv::Point(carryX, carryY + 20), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, "N: " + GetDegMinSec(acftN), cv::Point(carryX, carryY + 40), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, "H: " + ConvertNum2Str(acftH) + "m", cv::Point(carryX, carryY + 60), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, "Yaw: " + ConvertNum2Str(acftYaw) + "deg", cv::Point(carryX, carryY + 90), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, "Pitch: " + ConvertNum2Str(acftPitch) + "deg", cv::Point(carryX, carryY + 110), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, "Roll: " + ConvertNum2Str(acftRollAngle) + "deg", cv::Point(carryX, carryY + 130), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "E: " + Utils::GetDegMinSec(acftE), cv::Point(carryX, carryY + 15), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "N: " + Utils::GetDegMinSec(acftN), cv::Point(carryX, carryY + 30), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "H: " + Utils::ConvertNum2Str(acftH) + "m", cv::Point(carryX, carryY + 45), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Yaw: " + Utils::ConvertNum2Str(acftYaw) + "deg", cv::Point(carryX, carryY + 60), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Pitch: " + Utils::ConvertNum2Str(acftPitch) + "deg", cv::Point(carryX, carryY + 75), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Roll: " + Utils::ConvertNum2Str(acftRollAngle) + "deg", cv::Point(carryX, carryY + 90), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
 
     // 伺服信息绘制
-    int servoX = img.cols / 23 * 20;
+    int servoX = img.cols / 23 * 19;
     int servoY = img.rows / 13 * 12;
     int servoYaw = 0;
     int servoPitch = 0;
     cv::putText(img, "SERVO", cv::Point(servoX, servoY), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, "Yaw: " + ConvertNum2Str(servoYaw) + "deg", cv::Point(servoX, servoY + 20), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, "Pitch :" + ConvertNum2Str(servoPitch) + "deg", cv::Point(servoX, servoY + 40), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Yaw: " + Utils::ConvertNum2Str(servoYaw) + "deg", cv::Point(servoX, servoY + 15), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, "Pitch :" + Utils::ConvertNum2Str(servoPitch) + "deg", cv::Point(servoX, servoY + 30), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
 
     // 绘制中心十字
     int crossX = img.cols / 2 + crossCenterPtShift.x;
@@ -1127,7 +1063,7 @@ void PaintOSD(cv::Mat &img)
     int viewY = img.rows / 2;
     int fieldOfView = 0;
     cv::putText(img, "Zoom", cv::Point(viewX, viewY), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
-    cv::putText(img, ConvertTimesNum2Str(fieldOfView) + "X", cv::Point(viewX, viewY + 20), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
+    cv::putText(img, Utils::ConvertTimesNum2Str(fieldOfView) + "X", cv::Point(viewX, viewY + 15), cv::FONT_HERSHEY_SIMPLEX, fontSize, osdColor, fontThickness, cv::LINE_AA);
 }
 
 int IMG_FRAME_SIZE = 640*512;
@@ -1149,7 +1085,7 @@ int main(int argc, char *argv[])
     uint8_t buffer[1024];
     uint8_t* imgBufRaw;
     bool findHeader = false;
-    cv::Mat udpimg = cv::Mat(512,640,CV_8UC1);
+    cv::Mat udpimgOneChan = cv::Mat(512,640,CV_8UC1);
     ACLLITE_LOG_INFO("exec %s program\n", inParam.c_str());
     if (inParam == "ethvideo") {
         imgBufRaw = (uint8_t*)malloc(IMG_FRAME_SIZE*sizeof(uint8_t));
@@ -1201,16 +1137,16 @@ int main(int argc, char *argv[])
     string fileName;
     bool release = false;
     const char* modelPath = "/det.om";
-    const int32_t modelWidth = 640;
-    const int32_t modelHeight = 640;
-    SampleYOLOV7 sampleYOLO(modelPath, modelWidth, modelHeight);
-    Result ret = sampleYOLO.InitResource();
+    const int32_t modelWidth = 416;
+    const int32_t modelHeight = 416;
+    ObjectDetect detect(modelPath, modelWidth, modelHeight);
+    Result ret = detect.Init();
     if (ret == FAILED) {
         ACLLITE_LOG_ERROR("InitResource failed, errorCode is %d", ret);
         return FAILED;
     }
 
-    std::vector<InferenceOutput> inferOutputs;
+    //std::vector<InferenceOutput> inferOutputs;
     InitUDPSendInfo();
 
     m_stracker = new itracker();
@@ -1233,6 +1169,8 @@ int main(int argc, char *argv[])
                     if (trackShiftPixelPt.x == 0 || trackShiftPixelPt.y == 0) {
                         trackShiftPixelPt = cv::Point(img.cols / 2, img.rows / 2);
                     }
+                    cv::resize(img, img, cv::Size(640, 512));
+                    trackShiftPixelPt = cv::Point(320, 256);
                     m_stracker->init(trackShiftPixelPt, img);
                     trackerInited = true;
                     lastTrackTargetPt = cv::Point(img.cols / 2, img.rows / 2);
@@ -1242,6 +1180,7 @@ int main(int argc, char *argv[])
                         trackOn = false;
                         trackerInited = false;
                     }
+                    cv::resize(img, img, cv::Size(640, 512));
                     cv::Rect kcfResult = m_stracker->update(img);
                     cv::Point trackerCenterPt = m_stracker->centerPt();
                     missTargetX = trackerCenterPt.x - img.cols / 2;
@@ -1256,33 +1195,28 @@ int main(int argc, char *argv[])
 
             }
 
-            PaintOSD(img);
+            if (detectSwitch) {
+                ret = detect.Preprocess(img);
+                if (ret == FAILED) {
+                    ACLLITE_LOG_ERROR("Preprocess failed\n");
+                    continue;
+                }
 
-            if (!detectSwitch) {
-                UdpSendVideo(img);
-                continue;
-            }
-            srcImage = img.clone();
-            if (img.rows <= 0) {
-                continue;
+                aclmdlDataset* inferenceOutput = nullptr;
+                ret = detect.Inference(inferenceOutput);
+                if (ret == FAILED || inferenceOutput == nullptr) {
+                    ACLLITE_LOG_ERROR("Inference failed, errorCode is %d", ret);
+                    return FAILED;
+                }
+
+                ret = detect.Postprocess(img, inferenceOutput);
+                if (ret == FAILED) {
+                    ACLLITE_LOG_ERROR("Postprocess failed, errorCode is %d", ret);
+                    return FAILED;
+                }
             }
 
-            cv::resize(img, img,cv::Size(640,640));
-            cv::cvtColor(img,img,CV_BGR2YUV_I420);
-            inferOutputs.clear();
-
-            ret = sampleYOLO.Inference(inferOutputs);
-            if (ret == FAILED) {
-                ACLLITE_LOG_ERROR("Inference failed, errorCode is %d", ret);
-                return FAILED;
-            }
-
-            int i=0;
-            ret = sampleYOLO.GetResult(inferOutputs, fileName, i, release);
-            if (ret == FAILED) {
-                ACLLITE_LOG_ERROR("GetResult failed, errorCode is %d", ret);
-                return FAILED;
-            }
+            UdpSendVideo(img);
         }
         close(sockfdUDPSend);
         return SUCCESS;
@@ -1327,33 +1261,40 @@ int main(int argc, char *argv[])
         }
 
         if(sum == IMG_FRAME_SIZE) {
-            udpimg.data = imgBufRaw;
+            udpimgOneChan.data = imgBufRaw;
+            std::cout<<"udpimgOneChan.type:"<< udpimgOneChan.type()<<std::endl;
+            cv::Mat udpimg = cv::Mat::zeros(udpimgOneChan.rows, udpimgOneChan.cols, CV_8UC3);//转三通道
+            vector<cv::Mat> channels;
+            for (int i = 0; i < 3; i++) {
+                channels.push_back(udpimgOneChan);
+            }
+            merge(channels, udpimg);
+
             auto stamp = std::chrono::system_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stamp - laststamp);
             laststamp = stamp;
             std::cout<<"time interval:"<< duration.count() << "ms"<<std::endl;
 
             if (trackOn) {
-                if (m_stracker->isLost()) {
-                    m_stracker->reset();
-                    trackOn = false;
-                    trackerInited = false;
-                    break;
-                }
-
                 if (!trackerInited) {
                     m_stracker->reset();
                     if (trackShiftPixelPt.x == 0 || trackShiftPixelPt.y == 0) {
-                        trackShiftPixelPt = cv::Point(img.cols / 2, img.rows / 2);
+                        trackShiftPixelPt = cv::Point(udpimg.cols / 2, udpimg.rows / 2);
                     }
+                    ACLLITE_LOG_INFO("trackShiftPixelPt:(%d, %d), udpimg:(%d, %d)\n", trackShiftPixelPt.x, trackShiftPixelPt.y, udpimg.cols, udpimg.rows);
                     m_stracker->init(trackShiftPixelPt, udpimg);
                     trackerInited = true;
-                    lastTrackTargetPt = cv::Point(img.cols / 2, img.rows / 2);
+                    lastTrackTargetPt = cv::Point(udpimg.cols / 2, udpimg.rows / 2);
                 } else {
+                    if (m_stracker->isLost()) {
+                        m_stracker->reset();
+                        trackOn = false;
+                        trackerInited = false;
+                    }
                     cv::Rect kcfResult = m_stracker->update(udpimg);
                     cv::Point trackerCenterPt = m_stracker->centerPt();
-                    missTargetX = trackerCenterPt.x - img.cols / 2;
-                    missTargetY = trackerCenterPt.y - img.rows / 2;
+                    missTargetX = trackerCenterPt.x - udpimg.cols / 2;
+                    missTargetY = trackerCenterPt.y - udpimg.rows / 2;
                     trackTargetMoveSpeedX = (trackerCenterPt.x - lastTrackTargetPt.x) * 30 * 0.0001;
                     trackTargetMoveSpeedY = (trackerCenterPt.y - lastTrackTargetPt.y) * 30 * 0.0001;
                     lastTrackTargetPt = trackerCenterPt;
@@ -1361,33 +1302,40 @@ int main(int argc, char *argv[])
                         cv::Point( kcfResult.x+kcfResult.width, kcfResult.y+kcfResult.height),
                         cv::Scalar(145,79,59), 3, 8);
                 }
+
             }
 
-            PaintOSD(udpimg);
+            //PaintOSD(udpimg);
             //detectSwitch = true;
             if (detectSwitch) {
-                srcImage = udpimg.clone();
-                cv::resize(udpimg,img,cv::Size(640,640));
-                inferOutputs.clear();
-                ret = sampleYOLO.Inference(inferOutputs);
+                ret = detect.Preprocess(udpimg);
                 if (ret == FAILED) {
+                    ACLLITE_LOG_ERROR("Preprocess failed\n");
+                    continue;
+                }
+
+                aclmdlDataset* inferenceOutput = nullptr;
+                ret = detect.Inference(inferenceOutput);
+                if (ret == FAILED || inferenceOutput == nullptr) {
                     ACLLITE_LOG_ERROR("Inference failed, errorCode is %d", ret);
                     return FAILED;
                 }
-                int i=0;
-                ret = sampleYOLO.GetResult(inferOutputs, fileName, i, release);
+
+                ret = detect.Postprocess(udpimg, inferenceOutput);
                 if (ret == FAILED) {
-                    ACLLITE_LOG_ERROR("GetResult failed, errorCode is %d", ret);
+                    ACLLITE_LOG_ERROR("Postprocess failed, errorCode is %d", ret);
                     return FAILED;
                 }
-            } else {
-                UdpSendVideo(udpimg);
             }
+            UdpSendVideo(udpimg);
+            // cv::imshow("1", udpimg);
+            // cv::waitKey(1);
             memset(imgBufRaw, 0, IMG_FRAME_SIZE*sizeof(uint8_t));
         } else {
             printf("error img data, sum:%d\n", sum);
         }
     }
+
     close(sockfdUDPSend);
     return SUCCESS;
 }
